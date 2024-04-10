@@ -1,14 +1,9 @@
-use actix_web::{get, post, web, HttpResponse, Responder};
+use std::io;
 use rand::Rng;
-use std::sync::{Arc, Mutex};
-use serde_json::json;
-use actix_web::App;
-use actix_web::HttpServer;
 
 trait WaterLevelSensor {
     fn get_current_water_level(&self) -> i32;
-    fn release_water(&mut self, water_level: i32);
-    fn add_water(&mut self);
+    fn release_water(&self, water_level: i32);
 }
 
 struct RandomWaterLevelSensor;
@@ -19,16 +14,12 @@ impl WaterLevelSensor for RandomWaterLevelSensor {
         rng.gen_range(1..101)
     }
 
-    fn release_water(&mut self, water_level: i32) {
+    fn release_water(&self, water_level: i32) {
         if water_level > 30 {
             println!("Water released.");
         } else {
             println!("Water level is too low to release water.");
         }
-    }
-
-    fn add_water(&mut self) {
-        // Not implemented for RandomWaterLevelSensor
     }
 }
 
@@ -40,6 +31,22 @@ impl OverflowSensor {
     fn new() -> Self {
         OverflowSensor { water_level: 0 }
     }
+
+    fn add_water(&mut self, amount: i32) {
+        self.water_level += amount;
+        self.check_overflow();
+    }
+
+    fn check_overflow(&self) {
+        if self.water_level > 100 {
+            println!("Overflow detected in the cistern. Signaling to stop water supply!");
+            self.stop_water_supply();
+        }
+    }
+
+    fn stop_water_supply(&self) {
+        println!("Stopping water supply from rainwater collector to prevent overflow in the cistern!");
+    }
 }
 
 impl WaterLevelSensor for OverflowSensor {
@@ -47,18 +54,12 @@ impl WaterLevelSensor for OverflowSensor {
         self.water_level
     }
 
-    fn release_water(&mut self, water_level: i32) {
+    fn release_water(&self, water_level: i32) {
         if water_level < 30 {
             println!("Cistern water level is too low. Stopping water outlet.");
         } else {
             println!("Cistern water level is sufficient. Proceeding with water outlet.");
         }
-    }
-
-    fn add_water(&mut self) {
-        let mut rng = rand::thread_rng();
-        let water_amount: i32 = rng.gen_range(1..101);
-        self.water_level += water_amount;
     }
 }
 
@@ -69,6 +70,11 @@ struct FountainBasinSensor {
 impl FountainBasinSensor {
     fn new() -> Self {
         FountainBasinSensor { water_level: 0 }
+    }
+
+    fn add_water(&mut self, amount: i32) {
+        self.water_level += amount;
+        self.check_alarm();
     }
 
     fn check_alarm(&self) {
@@ -85,79 +91,47 @@ impl WaterLevelSensor for FountainBasinSensor {
         self.water_level
     }
 
-    fn release_water(&mut self, _water_level: i32) {
+    fn release_water(&self, _water_level: i32) {
         // FountainBasinSensor does not release water, so this method is empty
     }
-
-    fn add_water(&mut self) {
-        let mut rng = rand::thread_rng();
-        let water_amount: i32 = rng.gen_range(1..101);
-        self.water_level += water_amount;
-        self.check_alarm();
-    }
 }
 
-// Define API handlers
-#[get("/sensors")]
-async fn get_sensor_state(data: web::Data<Arc<Mutex<(RandomWaterLevelSensor, RandomWaterLevelSensor, OverflowSensor, FountainBasinSensor)>>>) -> impl Responder {
-    match data.lock() {
-        Ok(sensors) => {
-            let (sensor1, sensor2, sensor3, sensor4) = &*sensors;
+fn main() {
+    let sensor1 = RandomWaterLevelSensor;
+    let sensor2 = RandomWaterLevelSensor;
+    let mut sensor3 = OverflowSensor::new();
+    let mut sensor4 = FountainBasinSensor::new();
 
-            let water_level1 = sensor1.get_current_water_level();
-            let water_level2 = sensor2.get_current_water_level();
-            let water_level3 = sensor3.get_current_water_level();
-            let water_level4 = sensor4.get_current_water_level();
+    let mut input = String::new();
+    loop {
+        let water_level1 = sensor1.get_current_water_level();
+        let water_level2 = sensor2.get_current_water_level();
+        let water_level3 = sensor3.get_current_water_level();
+        let water_level4 = sensor4.get_current_water_level();
 
-            HttpResponse::Ok().json(json!({
-                "sensor1": water_level1,
-                "sensor2": water_level2,
-                "sensor3": water_level3,
-                "sensor4": water_level4,
-            }))
-        }
-        Err(e) => {
-            println!("Failed to lock sensors: {}", e);
-            HttpResponse::InternalServerError().finish()
-        }
-    }
-}
+        println!("Current water level - Sensor 1: {}", water_level1);
+        println!("Current water level - Sensor 2: {}", water_level2);
+        println!("Current water level - Sensor 3 (Cistern): {}", water_level3);
+        println!("Current water level - Sensor 4 (Fountain Basin): {}", water_level4);
 
-#[post("/add_water")]
-async fn add_water(data: web::Data<Arc<Mutex<(RandomWaterLevelSensor, RandomWaterLevelSensor, OverflowSensor, FountainBasinSensor)>>>) -> impl Responder {
-    match data.lock() {
-        Ok(mut sensors) => {
-            let (_, _, sensor3, sensor4) = &mut *sensors;
-            sensor3.add_water();
-            sensor4.add_water();
+        println!("Please select an action (1: Add water to cistern, 2: Release water from cistern, 3: Quit):");
 
-            HttpResponse::Ok().body("Random water added to cistern and fountain basin.")
-        }
-        Err(e) => {
-            println!("Failed to lock sensors: {}", e);
-            HttpResponse::InternalServerError().finish()
+        input.clear();
+        io::stdin().read_line(&mut input).expect("Failed to read input.");
+
+        match input.trim() {
+            "1" => {
+                let mut rng = rand::thread_rng();
+                let water_amount: i32 = rng.gen_range(1..101);
+                println!("Random water amount added to cistern: {}", water_amount);
+                sensor3.add_water(water_amount);
+                sensor4.add_water(water_amount);
+            }
+            "2" => {
+                sensor3.release_water(sensor3.get_current_water_level());
+            }
+            "3" => break,
+            _ => println!("Invalid input. Please use 1, 2, or 3 to select an action."),
         }
     }
-}
-
-#[actix_web::main]
-async fn main() -> std::io::Result<()> {
-    // Create shared state for sensors
-    let sensors = Arc::new(Mutex::new((
-        RandomWaterLevelSensor,
-        RandomWaterLevelSensor,
-        OverflowSensor::new(),
-        FountainBasinSensor::new(),
-    )));
-
-    // Start Actix HTTP server
-    HttpServer::new(move || {
-        App::new()
-            .app_data(web::Data::new(sensors.clone()))
-            .service(get_sensor_state)
-            .service(add_water)
-    })
-    .bind("127.0.0.1:8080")?
-    .run()
-    .await
 }
